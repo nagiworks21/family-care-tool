@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家族向け 服薬・通院サポート</title>
+<style>
+body { font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif; margin: 0; background: #f6f8fb; color: #222; }
+header { background: #2f6fed; color: #fff; padding: 18px 16px; }
+h1 { margin: 0; font-size: 20px; }
+main { padding: 16px; max-width: 720px; margin: 0 auto; }
+.card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+h2 { font-size: 17px; margin: 0 0 10px; }
+label { display: block; font-size: 13px; margin: 8px 0 4px; color: #444; }
+input, select, button { font-size: 16px; padding: 10px; border: 1px solid #ccd3dd; border-radius: 8px; width: 100%; box-sizing: border-box; }
+button { background: #2f6fed; color: #fff; border: 0; margin-top: 10px; cursor: pointer; font-weight: bold; }
+button.secondary { background: #eef2f8; color: #2f6fed; width: auto; font-size: 13px; padding: 6px 12px; margin-top: 0; font-weight: normal; }
+ul { list-style: none; padding: 0; margin: 0; }
+li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 8px; border-bottom: 1px solid #eef1f5; }
+.item-left { display: flex; align-items: center; gap: 12px; flex: 1; }
+.item-left input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; flex-shrink: 0; }
+.done { text-decoration: line-through; color: #8a94a6; }
+.small { font-size: 12px; color: #67707e; margin-top: 4px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tabs button { margin: 0; background: #eef2f8; color: #2f6fed; flex: 1; border-radius: 8px; padding: 10px; font-weight: bold; }
+.tabs button.active { background: #2f6fed; color: #fff; }
+.empty { color: #67707e; font-size: 14px; padding: 10px 0; }
+.badge { display: inline-block; background: #eef2f8; color: #2f6fed; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>家族向け 服薬・通院サポート</h1>
+  <div class="small" style="color: #e0e8ff;">今日の予定と、忘れやすい服薬をひとつにまとめる</div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button id="tab-today" class="active" onclick="showTab('today')">今日</button>
+    <button id="tab-meds" onclick="showTab('meds')">服薬</button>
+    <button id="tab-appts" onclick="showTab('appts')">通院</button>
+  </div>
+
+  <section id="today" class="card">
+    <h2>今日やること</h2>
+    <ul id="today-list"></ul>
+    <div class="empty" id="today-empty">本日の服薬・通院予定はありません。</div>
+  </section>
+
+  <section id="meds" class="card" style="display:none;">
+    <h2>服薬を追加</h2>
+    <label for="med-name">薬の名前</label>
+    <input id="med-name" placeholder="例：血圧の薬">
+
+    <label for="med-time">飲む時間</label>
+    <select id="med-time">
+      <option value="朝">朝</option>
+      <option value="昼">昼</option>
+      <option value="夜">夜</option>
+      <option value="就寝前">就寝前</option>
+    </select>
+
+    <label for="med-note">メモ</label>
+    <input id="med-note" placeholder="例：食後に飲む">
+
+    <button type="button" onclick="addMed()">追加する</button>
+
+    <h2 style="margin-top:24px">登録済みの服薬</h2>
+    <ul id="med-list"></ul>
+    <div class="empty" id="med-empty">まだ服薬が登録されていません。</div>
+  </section>
+
+  <section id="appts" class="card" style="display:none;">
+    <h2>通院を追加</h2>
+    <label for="appt-name">病院・目的</label>
+    <input id="appt-name" placeholder="例：内科の診察">
+
+    <label for="appt-date">日時</label>
+    <input id="appt-date" type="datetime-local">
+
+    <label for="appt-note">持ち物・メモ</label>
+    <input id="appt-note" placeholder="例：保険証、診察券を持っていく">
+
+    <button type="button" onclick="addAppt()">追加する</button>
+
+    <h2 style="margin-top:24px">予定された通院</h2>
+    <ul id="appt-list"></ul>
+    <div class="empty" id="appt-empty">通院予定はありません。</div>
+  </section>
+</main>
+
+<script>
+const KEY = 'family_care_v1';
+let data = JSON.parse(localStorage.getItem(KEY) || '{"meds":[],"appts":[],"done":{}}');
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(data));
+  render();
+}
+
+function getTodayString() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getDatePart(dateTimeStr) {
+  return dateTimeStr ? dateTimeStr.split('T')[0] : '';
+}
+
+function formatDateTime(dateTimeStr) {
+  if (!dateTimeStr) return '';
+  const d = new Date(dateTimeStr);
+  if (isNaN(d.getTime())) return dateTimeStr;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function addMed() {
+  const nameEl = document.getElementById('med-name');
+  const noteEl = document.getElementById('med-note');
+  const timeEl = document.getElementById('med-time');
+  const name = nameEl.value.trim();
+
+  if (!name) {
+    alert('薬の名前を入力してください');
+    return;
+  }
+
+  data.meds.push({
+    id: Date.now(),
+    name: name,
+    time: timeEl.value,
+    note: noteEl.value.trim()
+  });
+
+  nameEl.value = '';
+  noteEl.value = '';
+  save();
+}
+
+function addAppt() {
+  const nameEl = document.getElementById('appt-name');
+  const dateEl = document.getElementById('appt-date');
+  const noteEl = document.getElementById('appt-note');
+  const name = nameEl.value.trim();
+  const date = dateEl.value;
+
+  if (!name || !date) {
+    alert('病院名と日時を入力してください');
+    return;
+  }
+
+  data.appts.push({
+    id: Date.now(),
+    name: name,
+    date: date,
+    note: noteEl.value.trim()
+  });
+
+  nameEl.value = '';
+  dateEl.value = '';
+  noteEl.value = '';
+  save();
+}
+
+function del(type, id) {
+  data[type] = data[type].filter(x => x.id !== id);
+  save();
+}
+
+function toggle(id) {
+  const k = getTodayString() + '_' + id;
+  data.done[k] = !data.done[k];
+  save();
+}
+
+function render() {
+  const todayStr = getTodayString();
+
+  const medItemsHtml = data.meds.map(m => {
+    const isDone = !!data.done[todayStr + '_' + m.id];
+    return `
+      <li>
+        <div class="item-left">
+          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggle(${m.id})">
+          <div>
+            <div class="${isDone ? 'done' : ''}"><strong>${m.name}</strong> （${m.time}）</div>
+            ${m.note ? `<div class="small">${m.note}</div>` : ''}
+          </div>
+        </div>
+        <button type="button" class="secondary" onclick="del('meds', ${m.id})">削除</button>
+      </li>
+    `;
+  }).join('');
+
+  const apptItemsHtml = data.appts.map(a => {
+    const isToday = getDatePart(a.date) === todayStr;
+    const isDone = !!data.done[todayStr + '_' + a.id];
+    return `
+      <li>
+        <div class="item-left">
+          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggle(${a.id})">
+          <div>
+            <div class="${isDone ? 'done' : ''}">
+              ${isToday ? '<span class="badge">本日</span>' : ''}<strong>${a.name}</strong>
+            </div>
+            <div class="small">${formatDateTime(a.date)}${a.note ? ' ・ ' + a.note : ''}</div>
+          </div>
+        </div>
+        <button type="button" class="secondary" onclick="del('appts', ${a.id})">削除</button>
+      </li>
+    `;
+  }).join('');
+
+  const todayAppts = data.appts.filter(a => getDatePart(a.date) === todayStr);
+  const todayItemsHtml = data.meds.map(m => {
+    const isDone = !!data.done[todayStr + '_' + m.id];
+    return `
+      <li>
+        <div class="item-left">
+          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggle(${m.id})">
+          <div>
+            <div class="${isDone ? 'done' : ''}"><span class="badge">服薬</span><strong>${m.name}</strong> （${m.time}）</div>
+            ${m.note ? `<div class="small">${m.note}</div>` : ''}
+          </div>
+        </div>
+      </li>
+    `;
+  }).concat(todayAppts.map(a => {
+    const isDone = !!data.done[todayStr + '_' + a.id];
+    return `
+      <li>
+        <div class="item-left">
+          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggle(${a.id})">
+          <div>
+            <div class="${isDone ? 'done' : ''}"><span class="badge">通院</span><strong>${a.name}</strong></div>
+            <div class="small">${formatDateTime(a.date)}${a.note ? ' ・ ' + a.note : ''}</div>
+          </div>
+        </div>
+      </li>
+    `;
+  })).join('');
+
+  document.getElementById('med-list').innerHTML = medItemsHtml;
+  document.getElementById('appt-list').innerHTML = apptItemsHtml;
+  document.getElementById('today-list').innerHTML = todayItemsHtml;
+
+  document.getElementById('today-empty').style.display = (data.meds.length || todayAppts.length) ? 'none' : 'block';
+  document.getElementById('med-empty').style.display = data.meds.length ? 'none' : 'block';
+  document.getElementById('appt-empty').style.display = data.appts.length ? 'none' : 'block';
+}
+
+function showTab(name) {
+  ['today', 'meds', 'appts'].forEach(x => {
+    document.getElementById(x).style.display = (x === name) ? 'block' : 'none';
+    document.getElementById('tab-' + x).classList.toggle('active', x === name);
+  });
+}
+
+showTab('today');
+render();
+</script>
+</body>
+</html>
